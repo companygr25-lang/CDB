@@ -1,0 +1,7 @@
+{
+  "name": "CBD ENTREGAS - Gestão de Frotas",
+  "description": "Sistema de BI para controle de entregas via planilhas Excel e Leitor de Imagem, com acúmulo de dados e gestão de ocorrências.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
