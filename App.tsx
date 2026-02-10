@@ -8,7 +8,9 @@ import {
   Menu,
   X,
   Trash2,
-  AlertCircle
+  AlertCircle,
+  Wifi,
+  WifiOff
 } from 'lucide-react';
 import Dashboard from './components/Dashboard';
 import Uploader from './components/Uploader';
@@ -21,12 +23,19 @@ const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<ViewType>('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
   
   // Filtro de Mês Global
   const today = new Date();
   const [activeMonth, setActiveMonth] = useState(today.toISOString().substring(0, 7));
 
   useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
     const savedRecords = localStorage.getItem('cbd_entregas_data');
     const savedOccurrences = localStorage.getItem('cbd_entregas_occurrences');
     if (savedRecords) {
@@ -43,6 +52,11 @@ const App: React.FC = () => {
         console.error("Erro ao carregar ocorrências", e);
       }
     }
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
   }, []);
 
   useEffect(() => {
@@ -176,6 +190,18 @@ const App: React.FC = () => {
             {currentView === 'dashboard' ? 'Painel de Controle' : currentView === 'manual' ? 'Lançar Carga Extra' : 'Importar Dados'}
           </h2>
           <div className="flex items-center gap-4">
+            {/* Indicador Online/Offline */}
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border transition-all duration-500 ${isOnline ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 'bg-red-50 border-red-100 text-red-600'}`}>
+              <div className="relative flex h-2 w-2">
+                {isOnline && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>}
+                <span className={`relative inline-flex rounded-full h-2 w-2 ${isOnline ? 'bg-emerald-500' : 'bg-red-500'}`}></span>
+              </div>
+              <span className="text-[9px] font-black uppercase tracking-widest leading-none">
+                {isOnline ? 'Online' : 'Sem Conexão'}
+              </span>
+              {isOnline ? <Wifi size={12} /> : <WifiOff size={12} />}
+            </div>
+
             <div className="hidden sm:flex bg-slate-100 rounded-full px-4 py-1.5 text-[10px] font-black text-slate-600 border border-slate-200 uppercase tracking-widest">
                {filteredStats.rCount} Registros | {filteredStats.oCount} Ocorrências no Mês
             </div>
