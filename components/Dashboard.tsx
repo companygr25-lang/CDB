@@ -3,7 +3,7 @@ import React, { useMemo, useState } from 'react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, AreaChart, Area, Legend
 } from 'recharts';
-import { Truck, Users, DollarSign, TrendingUp, Package, ArrowLeft, AlertTriangle, X, UserCheck, Hash, MapPin, Search, ListFilter, Trash2, AlertCircle, Calendar, Save, CheckCircle2, Info, ChevronDown, Edit3, CalendarDays } from 'lucide-react';
+import { Truck, Users, DollarSign, TrendingUp, Package, ArrowLeft, AlertTriangle, X, UserCheck, Hash, MapPin, Search, ListFilter, Trash2, AlertCircle, Calendar, Save, CheckCircle2, Info, ChevronDown, Edit3, CalendarDays, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import { DeliveryRecord, Occurrence } from '../types';
 
 interface DashboardProps {
@@ -44,23 +44,20 @@ const Dashboard: React.FC<DashboardProps> = ({
   const [driverSearch, setDriverSearch] = useState('');
   const [showOccurrenceModal, setShowOccurrenceModal] = useState(false);
   const [calendarModalLoad, setCalendarModalLoad] = useState<DeliveryRecord | null>(null);
+  
+  const [occForm, setOccForm] = useState({
+    tipo: 'Volta' as 'Volta' | 'Devolução',
+    motivo: '',
+    quantidade: '',
+    valor: ''
+  });
 
-  // Identifica todos os meses que possuem dados registrados para o filtro "BI"
   const availableMonths = useMemo(() => {
     const months = new Set<string>();
     const todayStr = new Date().toISOString().substring(0, 7);
-    months.add(todayStr); // Garante o mês atual na lista
-    
-    records.forEach(r => {
-      const m = r.dataProcessamento.substring(0, 7);
-      if (m) months.add(m);
-    });
-    
-    occurrences.forEach(o => {
-      const m = o.data.substring(0, 7);
-      if (m) months.add(m);
-    });
-
+    months.add(todayStr);
+    records.forEach(r => months.add(r.dataProcessamento.substring(0, 7)));
+    occurrences.forEach(o => months.add(o.data.substring(0, 7)));
     return Array.from(months).sort((a, b) => b.localeCompare(a));
   }, [records, occurrences]);
 
@@ -71,14 +68,46 @@ const Dashboard: React.FC<DashboardProps> = ({
     return label.charAt(0).toUpperCase() + label.slice(1);
   };
 
-  const stats = useMemo(() => {
-    const filteredRecords = records.filter(r => r.dataProcessamento.startsWith(activeMonth));
-    const filteredOccurrences = occurrences.filter(o => o.data.startsWith(activeMonth));
+  // BI: Tendência Histórica (Últimos 6 Meses)
+  const historicalTrendData = useMemo(() => {
+    const sortedMonths = [...availableMonths].reverse().slice(-6);
+    return sortedMonths.map(m => {
+      const mRecs = records.filter(r => r.dataProcessamento.startsWith(m));
+      const mOccs = occurrences.filter(o => o.data.startsWith(m));
+      const totalEntregas = mRecs.reduce((acc, curr) => acc + curr.entregas, 0);
+      const totalVoltas = mOccs.reduce((acc, curr) => acc + curr.quantidade, 0);
+      return {
+        month: m.split('-').reverse().join('/'),
+        entregas: totalEntregas - totalVoltas,
+        voltas: totalVoltas
+      };
+    });
+  }, [records, occurrences, availableMonths]);
 
-    const totalEntregasBruto = filteredRecords.reduce((acc, curr) => acc + curr.entregas, 0);
-    const totalOcorrenciasGeral = filteredOccurrences.reduce((acc, curr) => acc + curr.quantidade, 0);
-    const totalValorBruto = filteredRecords.reduce((acc, curr) => acc + curr.valor, 0);
-    const totalValorOcorrencias = filteredOccurrences.reduce((acc, curr) => acc + curr.valor, 0);
+  const stats = useMemo(() => {
+    const filter = (data: any[], m: string) => data.filter(d => (d.dataProcessamento || d.data).startsWith(m));
+    
+    const currentRecs = filter(records, activeMonth);
+    const currentOccs = filter(occurrences, activeMonth);
+
+    // Comparação com mês anterior
+    const prevMonthIndex = availableMonths.indexOf(activeMonth) + 1;
+    const prevMonth = availableMonths[prevMonthIndex];
+    const prevRecs = prevMonth ? filter(records, prevMonth) : [];
+    const prevOccs = prevMonth ? filter(occurrences, prevMonth) : [];
+
+    const calculateTotals = (recs: any[], occs: any[]) => {
+      const bruto = recs.reduce((acc, curr) => acc + curr.entregas, 0);
+      const voltas = occs.reduce((acc, curr) => acc + curr.quantidade, 0);
+      const valBruto = recs.reduce((acc, curr) => acc + curr.valor, 0);
+      const valVoltas = occs.reduce((acc, curr) => acc + curr.valor, 0);
+      return { ok: bruto - voltas, v: voltas, liq: valBruto - valVoltas, loss: valVoltas };
+    };
+
+    const cur = calculateTotals(currentRecs, currentOccs);
+    const pre = calculateTotals(prevRecs, prevOccs);
+
+    const calcDelta = (c: number, p: number) => p === 0 ? 0 : ((c - p) / p) * 100;
 
     const allDrivers = [...DRIVERS_CASA, ...DRIVERS_AGREGADOS];
     const driverGroups = allDrivers.reduce((acc: any, nome) => {
@@ -90,13 +119,12 @@ const Dashboard: React.FC<DashboardProps> = ({
         totalValorOcorrencias: 0,
         ultimoAjudante: '',
         ultimaRota: '',
-        registros: [],
         tipo: DRIVERS_CASA.includes(nome) ? 'Casa' : 'Agregado'
       };
       return acc;
     }, {});
 
-    filteredRecords.forEach(curr => {
+    currentRecs.forEach(curr => {
       if (driverGroups[curr.motorista]) {
         driverGroups[curr.motorista].totalEntregas += curr.entregas;
         driverGroups[curr.motorista].totalValorBruto += curr.valor;
@@ -105,7 +133,7 @@ const Dashboard: React.FC<DashboardProps> = ({
       }
     });
 
-    filteredOccurrences.forEach(occ => {
+    currentOccs.forEach(occ => {
       if (driverGroups[occ.motorista]) {
         driverGroups[occ.motorista].totalOcorrencias += occ.quantidade;
         driverGroups[occ.motorista].totalValorOcorrencias += occ.valor;
@@ -113,13 +141,16 @@ const Dashboard: React.FC<DashboardProps> = ({
     });
 
     return { 
-      totalEntregasLiquido: totalEntregasBruto - totalOcorrenciasGeral, 
-      totalOcorrenciasGeral, 
-      totalValorLiquido: totalValorBruto - totalValorOcorrencias, 
-      totalValorOcorrencias, 
+      cur, 
+      deltas: {
+        ok: calcDelta(cur.ok, pre.ok),
+        v: calcDelta(cur.v, pre.v),
+        liq: calcDelta(cur.liq, pre.liq),
+        loss: calcDelta(cur.loss, pre.loss)
+      },
       driverList: Object.values(driverGroups) 
     };
-  }, [records, occurrences, activeMonth]);
+  }, [records, occurrences, activeMonth, availableMonths]);
 
   const uniqueLoads = useMemo(() => {
     if (!selectedDriver) return [];
@@ -133,39 +164,36 @@ const Dashboard: React.FC<DashboardProps> = ({
     });
   }, [records, selectedDriver, activeMonth]);
 
-  const daysInMonth = useMemo(() => {
-    const [year, month] = activeMonth.split('-').map(Number);
-    return new Date(year, month, 0).getDate();
-  }, [activeMonth]);
-
-  const handleDayValueChange = (day: number, value: string) => {
-    if (!calendarModalLoad || !selectedDriver) return;
-    const dateStr = `${activeMonth}-${day.toString().padStart(2, '0')}`;
-    const numValue = parseInt(value) || 0;
-
-    const existing = records.find(r => 
-      r.motorista === selectedDriver && r.dataProcessamento === dateStr && r.carga === calendarModalLoad.carga
-    );
-
-    if (existing) {
-      onUpdateRecord({ ...existing, entregas: numValue });
-    } else if (numValue > 0) {
-      onAddRecords([{
-        ...calendarModalLoad,
-        id: btoa(`day-${selectedDriver}-${dateStr}-${calendarModalLoad.carga}-${Date.now()}`),
-        dataProcessamento: dateStr,
-        entregas: numValue
-      }]);
+  const handleSaveOccurrence = () => {
+    if (!selectedDriver || !occForm.motivo || !occForm.quantidade) {
+      alert("Por favor, preencha o motivo e a quantidade.");
+      return;
     }
+    const today = new Date().toISOString().split('T')[0];
+    const newOcc: Occurrence = {
+      id: btoa(`occ-${selectedDriver}-${Date.now()}`),
+      motorista: selectedDriver,
+      data: today,
+      tipo: occForm.tipo,
+      motivo: occForm.motivo.toUpperCase(),
+      quantidade: parseInt(occForm.quantidade) || 0,
+      valor: parseFloat(occForm.valor.replace(',', '.')) || 0
+    };
+    onAddOccurrence(newOcc);
+    setOccForm({ tipo: 'Volta', motivo: '', quantidade: '', valor: '' });
+    setShowOccurrenceModal(false);
   };
 
-  const getDayValue = (day: number) => {
-    if (!calendarModalLoad || !selectedDriver) return '';
-    const dateStr = `${activeMonth}-${day.toString().padStart(2, '0')}`;
-    const rec = records.find(r => 
-      r.motorista === selectedDriver && r.dataProcessamento === dateStr && r.carga === calendarModalLoad.carga
+  const DeltaTag = ({ val, inverse = false }: { val: number, inverse?: boolean }) => {
+    if (val === 0) return null;
+    const isPos = val > 0;
+    const color = (isPos && !inverse) || (!isPos && inverse) ? 'emerald' : 'red';
+    return (
+      <span className={`inline-flex items-center gap-0.5 text-[9px] font-black px-1.5 py-0.5 rounded-md bg-${color}-50 text-${color}-600 border border-${color}-100 ml-2`}>
+        {isPos ? <ArrowUpRight size={10}/> : <ArrowDownRight size={10}/>}
+        {Math.abs(val).toFixed(0)}%
+      </span>
     );
-    return rec ? rec.entregas.toString() : '';
   };
 
   if (selectedDriver) {
@@ -208,7 +236,7 @@ const Dashboard: React.FC<DashboardProps> = ({
             <h3 className="text-[10px] font-black text-slate-900 uppercase tracking-widest">Cargas de {formatMonthLabel(activeMonth)}</h3>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {uniqueLoads.length > 0 ? uniqueLoads.map(load => (
+            {uniqueLoads.map(load => (
               <div key={load.id} className="bg-white rounded-xl p-4 border border-slate-100 shadow-sm flex items-center justify-between hover:border-blue-200 transition-colors group">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="p-2.5 bg-slate-50 text-slate-400 rounded-xl group-hover:bg-blue-50 group-hover:text-blue-600 transition-colors"><Package size={18}/></div>
@@ -221,37 +249,40 @@ const Dashboard: React.FC<DashboardProps> = ({
                   <CalendarDays size={18} />
                 </button>
               </div>
-            )) : (
-              <div className="col-span-full py-12 text-center border-2 border-dashed border-slate-200 rounded-2xl">
-                <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Sem registros para este motorista em {formatMonthLabel(activeMonth)}</p>
-              </div>
-            )}
+            ))}
           </div>
         </div>
 
-        {calendarModalLoad && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md">
-            <div className="bg-white rounded-[2rem] overflow-hidden max-w-2xl w-full shadow-2xl animate-in zoom-in-95 border border-slate-200">
-              <div className="bg-blue-600 p-6 text-white flex justify-between items-center">
-                <div className="flex items-center gap-4">
-                  <CalendarDays size={24} />
-                  <div>
-                    <h3 className="text-base font-black uppercase">Calendário Diário</h3>
-                    <p className="text-[9px] font-bold opacity-70 uppercase tracking-widest">Carga: {calendarModalLoad.carga} | {formatMonthLabel(activeMonth)}</p>
+        {showOccurrenceModal && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-md">
+            <div className="bg-white rounded-[2.5rem] overflow-hidden max-w-md w-full shadow-2xl animate-in zoom-in-95 border border-slate-200">
+              <div className="bg-amber-500 p-6 text-white flex justify-between items-center">
+                <div className="flex items-center gap-3"><AlertTriangle size={24} /><h3 className="text-base font-black uppercase">Nova Ocorrência</h3></div>
+                <button onClick={() => setShowOccurrenceModal(false)} className="p-2 hover:bg-white/20 rounded-full"><X size={20} /></button>
+              </div>
+              <div className="p-8 space-y-5">
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Tipo</label>
+                  <select value={occForm.tipo} onChange={(e) => setOccForm({...occForm, tipo: e.target.value as any})} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl font-bold text-sm outline-none">
+                    <option value="Volta">VOLTA</option>
+                    <option value="Devolução">DEVOLUÇÃO</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Motivo</label>
+                  <input type="text" placeholder="EX: AUSENTE" value={occForm.motivo} onChange={(e) => setOccForm({...occForm, motivo: e.target.value})} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl font-bold text-sm outline-none" />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Qtd</label>
+                    <input type="number" placeholder="0" value={occForm.quantidade} onChange={(e) => setOccForm({...occForm, quantidade: e.target.value})} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm text-blue-600 outline-none" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Valor R$</label>
+                    <input type="text" placeholder="0,00" value={occForm.valor} onChange={(e) => setOccForm({...occForm, valor: e.target.value})} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl font-black text-sm text-emerald-600 outline-none" />
                   </div>
                 </div>
-                <button onClick={() => setCalendarModalLoad(null)} className="p-2 hover:bg-white/20 rounded-full transition-colors"><X size={20} /></button>
-              </div>
-              <div className="p-8">
-                <div className="grid grid-cols-5 sm:grid-cols-7 gap-3 max-h-[50vh] overflow-y-auto pr-2 custom-scrollbar">
-                  {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(day => (
-                    <div key={day} className="flex flex-col gap-1 p-2.5 rounded-xl bg-slate-50 border border-slate-100 focus-within:border-blue-500 transition-colors">
-                      <span className="text-[8px] font-black text-slate-400 uppercase">Dia {day}</span>
-                      <input type="number" placeholder="0" value={getDayValue(day)} onChange={(e) => handleDayValueChange(day, e.target.value)} className="w-full bg-transparent font-black text-blue-600 text-base outline-none" />
-                    </div>
-                  ))}
-                </div>
-                <button onClick={() => setCalendarModalLoad(null)} className="w-full mt-8 bg-slate-900 text-white py-4 rounded-xl font-black text-xs uppercase shadow-xl hover:scale-[1.02] transition-all">Salvar Lançamentos</button>
+                <button onClick={handleSaveOccurrence} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black text-xs uppercase shadow-xl hover:scale-[1.02] active:scale-95 transition-all mt-4">Salvar Ocorrência</button>
               </div>
             </div>
           </div>
@@ -262,60 +293,91 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-10">
-      {/* Seletor de Mês BI - Filtrando o sistema inteiro */}
+      {/* Filtro Analítico */}
       <div className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-md flex flex-col sm:flex-row items-center justify-between gap-6 overflow-hidden relative">
         <div className="flex items-center gap-4">
           <div className="p-3 bg-blue-600 text-white rounded-2xl shadow-lg shadow-blue-500/20"><Calendar size={22} /></div>
           <div>
-            <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest leading-none">Mês de Referência</h4>
-            <p className="text-[10px] text-slate-400 font-bold uppercase mt-1.5">Clique no seletor para navegar no histórico</p>
+            <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest leading-none">Histórico de Dados</h4>
+            <p className="text-[10px] text-slate-400 font-bold uppercase mt-1.5 tracking-tighter">Comparação Mensal e Visualização de BI</p>
           </div>
         </div>
         
         <div className="relative w-full sm:w-80 group">
-          <div className="absolute left-5 top-1/2 -translate-y-1/2 text-blue-600 pointer-events-none group-hover:scale-110 transition-transform">
-            <CalendarDays size={20} />
-          </div>
+          <div className="absolute left-5 top-1/2 -translate-y-1/2 text-blue-600 pointer-events-none group-hover:scale-110 transition-transform"><CalendarDays size={20} /></div>
           <select 
             value={activeMonth} 
             onChange={(e) => setActiveMonth(e.target.value)} 
-            className="w-full pl-14 pr-12 py-4 bg-slate-50 border-2 border-slate-200 rounded-2xl font-black text-sm text-slate-700 outline-none hover:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all appearance-none cursor-pointer shadow-sm shadow-slate-200/50"
+            className="w-full pl-14 pr-12 py-4 bg-slate-50 border-2 border-slate-200 rounded-2xl font-black text-sm text-slate-700 outline-none hover:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all appearance-none cursor-pointer"
           >
-            {availableMonths.map(m => (
-              <option key={m} value={m}>{formatMonthLabel(m)}</option>
-            ))}
+            {availableMonths.map(m => <option key={m} value={m}>{formatMonthLabel(m)}</option>)}
           </select>
-          <div className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
-            <ChevronDown size={20} />
-          </div>
+          <div className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none"><ChevronDown size={20} /></div>
         </div>
       </div>
 
-      {/* Grid de Métricas - Com centavos e design ajustado */}
+      {/* Cards de BI com Deltas */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { icon: <Package size={24}/>, label: "Entregas OK", val: stats.totalEntregasLiquido, color: "blue", prefix: "" },
-          { icon: <AlertTriangle size={24}/>, label: "Voltas/Dev.", val: stats.totalOcorrenciasGeral, color: "amber", prefix: "" },
-          { icon: <DollarSign size={24}/>, label: "Faturamento", val: stats.totalValorLiquido, color: "emerald", prefix: "R$ " },
-          { icon: <Hash size={24}/>, label: "Perda/Abat.", val: stats.totalValorOcorrencias, color: "red", prefix: "R$ " }
+          { icon: <Package size={24}/>, label: "Entregas OK", val: stats.cur.ok, delta: stats.deltas.ok, color: "blue", prefix: "" },
+          { icon: <AlertTriangle size={24}/>, label: "Voltas/Dev.", val: stats.cur.v, delta: stats.deltas.v, color: "amber", prefix: "", inv: true },
+          { icon: <DollarSign size={24}/>, label: "Faturamento", val: stats.cur.liq, delta: stats.deltas.liq, color: "emerald", prefix: "R$ " },
+          { icon: <Hash size={24}/>, label: "Perda/Abat.", val: stats.cur.loss, delta: stats.deltas.loss, color: "red", prefix: "R$ ", inv: true }
         ].map((c, i) => (
-          <div key={i} className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm flex flex-col gap-4 relative overflow-hidden group hover:translate-y-[-6px] transition-all">
-            <div className={`w-12 h-12 bg-${c.color}-50 text-${c.color}-600 rounded-2xl flex items-center justify-center transition-transform group-hover:scale-110`}>{c.icon}</div>
+          <div key={i} className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm flex flex-col gap-4 group hover:translate-y-[-4px] transition-all">
+            <div className="flex justify-between items-start">
+              <div className={`w-11 h-11 bg-${c.color}-50 text-${c.color}-600 rounded-xl flex items-center justify-center transition-transform group-hover:rotate-6`}>{c.icon}</div>
+              <DeltaTag val={c.delta} inverse={c.inv} />
+            </div>
             <div className="min-w-0">
-              <p className="text-[10px] sm:text-xs font-black text-slate-400 uppercase tracking-widest mb-1.5 truncate">{c.label}</p>
-              <h4 className="text-base sm:text-2xl font-black text-slate-900 tracking-tight truncate leading-none">
-                {c.prefix}{typeof c.val === 'number' ? c.val.toLocaleString('pt-BR', {minimumFractionDigits: c.prefix ? 2 : 0, maximumFractionDigits: 2}) : c.val}
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 truncate">{c.label}</p>
+              <h4 className="text-base sm:text-2xl font-black text-slate-900 tracking-tight leading-none">
+                {c.prefix}{c.val.toLocaleString('pt-BR', {minimumFractionDigits: c.prefix ? 2 : 0, maximumFractionDigits: 2})}
               </h4>
             </div>
           </div>
         ))}
       </div>
 
+      {/* BI: Gráfico de Tendência para Comparação */}
+      <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm">
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest leading-none">Tendência Mensal</h3>
+            <p className="text-[10px] text-slate-400 font-bold mt-1.5 uppercase tracking-tighter">Comparativo de performance nos últimos meses</p>
+          </div>
+          <div className="flex gap-4">
+            <div className="flex items-center gap-1.5 text-[9px] font-black uppercase text-blue-600"><div className="w-2.5 h-2.5 rounded-full bg-blue-600"></div> Entregas OK</div>
+            <div className="flex items-center gap-1.5 text-[9px] font-black uppercase text-amber-500"><div className="w-2.5 h-2.5 rounded-full bg-amber-500"></div> Voltas</div>
+          </div>
+        </div>
+        <div className="h-[280px] w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={historicalTrendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+              <defs>
+                <linearGradient id="colorOk" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#2563eb" stopOpacity={0.1}/><stop offset="95%" stopColor="#2563eb" stopOpacity={0}/></linearGradient>
+                <linearGradient id="colorV" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#f59e0b" stopOpacity={0.1}/><stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/></linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+              <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{fontSize: 9, fontWeight: 900, fill: '#94a3b8'}} dy={10} />
+              <YAxis axisLine={false} tickLine={false} tick={{fontSize: 9, fontWeight: 900, fill: '#94a3b8'}} />
+              <Tooltip 
+                contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase' }}
+                cursor={{ stroke: '#cbd5e1', strokeWidth: 1 }}
+              />
+              <Area type="monotone" dataKey="entregas" stroke="#2563eb" strokeWidth={3} fillOpacity={1} fill="url(#colorOk)" />
+              <Area type="monotone" dataKey="voltas" stroke="#f59e0b" strokeWidth={3} fillOpacity={1} fill="url(#colorV)" />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* Lista de Motoristas */}
       <div className="space-y-8">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 border-b border-slate-200 pb-6">
           <div>
             <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest leading-none">Gestão de Frotas Diária</h3>
-            <p className="text-[10px] text-slate-400 font-bold mt-1.5 uppercase tracking-widest">Selecione o motorista para lançar as diárias de {formatMonthLabel(activeMonth)}</p>
+            <p className="text-[10px] text-slate-400 font-bold mt-1.5 uppercase tracking-widest">Lançamentos de {formatMonthLabel(activeMonth)}</p>
           </div>
           <div className="relative w-full sm:w-80">
             <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
